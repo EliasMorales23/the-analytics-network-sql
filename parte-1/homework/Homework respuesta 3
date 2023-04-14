@@ -1,0 +1,174 @@
+/*
+ Clase 3
+
+--1. Mostrar nombre y codigo de producto, categoria y color para
+--todos los productos de la marca Philips y Samsung,
+-- mostrando la leyenda "Unknown" cuando no hay un color disponible
+
+SELECT  UPPER(nombre),
+		codigo_producto,
+		categoria,
+		COALESCE(color,'Unknown') AS color
+		FROM stg.product_master
+		WHERE nombre LIKE '%PHILIPS%'
+		OR nombre LIKE '%SAMSUNG%'
+		
+	
+
+
+--2. Calcular las ventas brutas y los impuestos pagados por pais y provincia 
+--en la moneda correspondiente.
+			 			 
+SELECT  SUM(LINE.venta) AS venta_bruta,
+		SUM(LINE.impuestos) AS impuestos,
+		SM.pais,
+		SM.provincia,
+		LINE.moneda,
+		LINE.fecha
+	FROM stg.order_line_sale AS LINE
+	INNER JOIN stg.store_master AS SM
+	ON LINE.tienda = SM.codigo_tienda
+	GROUP BY LINE.fecha,SM.pais,
+			 SM.provincia,LINE.moneda			 
+		
+
+
+
+
+
+--3. Calcular las ventas totales por subcategoria de producto
+--para cada moneda ordenados por subcategoria y moneda.
+
+
+SELECT  SUM(O_LINE.venta) AS ventas_totales,
+		P_MASTER.subcategoria,
+		O_LINE.moneda
+		FROM stg.order_line_sale AS O_LINE
+		INNER JOIN  stg.product_master AS P_MASTER 
+		ON O_LINE.producto= O_LINE.producto
+		GROUP BY P_MASTER.subcategoria, O_LINE.moneda
+		
+
+
+--4. Calcular las unidades vendidas por subcategoria de producto
+--y la concatenacion de pais, provincia; usar guion como separador 
+--y usarla para ordernar el resultado.
+
+SELECT  SUM(LINE.venta) AS venta_bruta,
+		CONCAT(SM.pais,'-',SM.provincia) AS pais_provincia,
+		PM.subcategoria
+	FROM stg.order_line_sale AS LINE
+	INNER JOIN stg.store_master AS SM
+	ON LINE.tienda = SM.codigo_tienda
+	INNER JOIN stg.product_master AS PM
+	ON LINE.producto=PM.codigo_producto
+	GROUP BY PM.subcategoria,CONCAT(SM.pais,'-',SM.provincia)
+	ORDER BY CONCAT(SM.pais,'-',SM.provincia)
+
+
+
+--5.Mostrar una vista donde sea vea el nombre de tienda 
+--y la cantidad de entradas de personas que hubo desde la fecha de apertura para el sistema "super_store". 
+
+CREATE VIEW Vista_Nombre AS
+SELECT SM.nombre,
+	   SUM(T_C.conteo) AS Cant_entrada,
+	   CAST(SM.fecha_apertura AS varchar)
+	FROM stg.store_master AS SM
+	INNER JOIN stg.super_store_count AS T_C
+	ON SM.codigo_tienda = T_C.tienda
+	WHERE CAST(SM.fecha_apertura AS varchar) <= T_C.fecha
+	GROUP BY SM.nombre,CAST(SM.fecha_apertura AS varchar)
+	
+--SELECT * FROM Vista_Nombre
+
+
+--6.Cual es el nivel de inventario promedio en cada mes 
+--a nivel de codigo de producto y tienda;
+--mostrar el resultado con el nombre de la tienda.
+
+SELECT AVG(Inv.inicial+Inv.final) AS prom_inventario,
+		EXTRACT(MONTH FROM Inv.fecha) AS MES,
+		Inv.sku AS codigo_producto,
+		S_T.nombre AS nombre_tienda
+	FROM stg.inventory AS Inv
+	INNER JOIN stg.store_master AS S_T
+	ON Inv.tienda= S_T.codigo_tienda
+	GROUP BY EXTRACT(MONTH FROM Inv.fecha),Inv.sku,S_T.nombre
+
+*/
+
+--7.Calcular la cantidad de unidades vendidas por material. 
+--Para los productos que no tengan material usar 'Unknown', 
+--homogeneizar los textos si es necesario.
+	
+SELECT SUM(O_LINE.venta) AS Venta_Total,
+	   COALESCE(UPPER(P_MASTER.material),'Unknown') AS Tipo_Material
+		 FROM stg.order_line_sale AS O_LINE
+		 	INNER JOIN stg.product_master AS P_MASTER
+		 	ON O_LINE.producto = P_MASTER.codigo_producto
+		 GROUP BY P_MASTER.material
+	
+		
+--8.Mostrar la tabla order_line_sales agregando una columna 
+--que represente el valor de venta bruta en cada linea convertido a dolares
+--usando la tabla de tipo de cambio.
+
+SELECT 
+		CASE 
+		WHEN LINE.moneda = 'ARS' then LINE.venta * MONTHLY.cotizacion_usd_peso
+		WHEN LINE.moneda = 'EUR' then LINE.venta * MONTHLY.cotizacion_usd_eur
+		WHEN LINE.moneda = 'URU' then LINE.venta * MONTHLY.cotizacion_usd_uru
+		END		
+	FROM stg.order_line_sale AS LINE
+	INNER JOIN stg.monthly_average_fx_rate AS MONTHLY
+	ON date_part('MONTH',LINE.fecha) = date_part('MONTH',MONTHLY.mes)
+	
+--al agrupar los JOIN y realizarlo con el DATE_PART (MONTH), la union misma realizara la separacion por registro   	
+	
+
+
+
+9. Calcular cantidad de ventas totales de la empresa en dolares.	
+SELECT 
+		CASE 
+		WHEN LINE.moneda = 'ARS' then SUM(LINE.venta) * MONTHLY.cotizacion_usd_peso
+		WHEN LINE.moneda = 'EUR' then SUM(LINE.venta) * MONTHLY.cotizacion_usd_eur
+		WHEN LINE.moneda = 'URU' then SUM(LINE.venta) * MONTHLY.cotizacion_usd_uru
+		END,
+		MONTHLY.mes
+	FROM stg.order_line_sale AS LINE
+	INNER JOIN stg.monthly_average_fx_rate AS MONTHLY
+	ON date_part('MONTH',LINE.fecha) = date_part('MONTH',MONTHLY.mes)
+	GROUP BY LINE.moneda,MONTHLY.cotizacion_usd_peso,
+			MONTHLY.cotizacion_usd_eur,MONTHLY.cotizacion_usd_uru,
+			MONTHLY.mes
+	
+
+10. Mostrar en la tabla de ventas el margen de venta por cada linea.
+--Siendo margen = (venta - promociones) - costo expresado en dolares.
+
+SELECT 
+		CASE 
+		WHEN LINE.moneda = 'ARS' then ROUND(LINE.venta-COALESCE(LINE.descuento,0)) - MONTHLY.cotizacion_usd_peso
+		WHEN LINE.moneda = 'EUR' then ROUND(LINE.venta-COALESCE(LINE.descuento,0)) - MONTHLY.cotizacion_usd_eur
+		WHEN LINE.moneda = 'URU' then ROUND(LINE.venta-COALESCE(LINE.descuento,0)) - MONTHLY.cotizacion_usd_uru
+		END,
+		LINE.orden
+	FROM stg.order_line_sale AS LINE
+	LEFT JOIN stg.monthly_average_fx_rate AS MONTHLY
+	ON date_part('MONTH',LINE.fecha) = date_part('MONTH',MONTHLY.mes)
+	GROUP BY LINE.moneda,MONTHLY.cotizacion_usd_peso,
+			MONTHLY.cotizacion_usd_eur,MONTHLY.cotizacion_usd_uru,
+			LINE.venta,LINE.descuento,LINE.orden
+
+ 
+
+
+11.Calcular la cantidad de items distintos de cada subsubcategoria
+--que se llevan por numero de orden.
+
+SELECT COUNT(DISTINCT codigo_producto),
+		subsubcategoria
+	FROM stg.product_master
+	GROUP BY subsubcategoria
